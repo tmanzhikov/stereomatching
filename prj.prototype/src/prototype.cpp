@@ -351,7 +351,8 @@ int main() {
   int max_d = 128;
 
   if (base.data && match.data) {
-    auto basic_cost = compute_census_rand_basic_cost(base, match, max_d);
+    vector<vector<vector<int> > > basic_cost = 
+        compute_census_rand_basic_cost(base, match, max_d);
     compute_cost_aggregation(basic_cost, 3, 10);
   } else {
     std::cout << "Failed to read images" << std::endl;

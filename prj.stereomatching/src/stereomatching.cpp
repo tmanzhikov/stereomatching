@@ -117,8 +117,8 @@ void StereoMatcher::AggregateCost(int x_from, int x_to, int delta_x,
                                   int x_dir, int x_edge, int y_cur, int y_prev) {
 
   static const cost_type inf = std::numeric_limits<cost_type>::max();
-  auto& cur = aggregation_buffer_[y_cur];
-  auto& prev = aggregation_buffer_[y_prev];
+  buffer& cur = aggregation_buffer_[y_cur];
+  buffer& prev = aggregation_buffer_[y_prev];
 
   for (int x = x_from; x != x_to; x += delta_x) {
     for (int d = 0; d < settings_.max_d; ++d) {
@@ -190,7 +190,7 @@ void StereoMatcher::ProcessLine(const uchar* base, const uchar* match,
 
   if (y == settings_.census_size - 1) {
     const int y_0 = y % 2;
-    auto& cur = aggregation_buffer_[y_0];
+    buffer& cur = aggregation_buffer_[y_0];
     for (int x = x_from; x < x_to; ++x) {
       for (int d = 0; d < settings_.max_d; ++d) {
         cur[d][x] = basic_cost_[d][x];
@@ -200,8 +200,8 @@ void StereoMatcher::ProcessLine(const uchar* base, const uchar* match,
     const int y_0 = y % 2;
     const int y_1 = 1 - y_0;
 
-    for (auto& line : aggregated_cost_) {
-      std::fill(begin(line), end(line), 0);
+    for (int i = 0; i < aggregated_cost_.size(); ++i) {
+      std::fill(begin(aggregated_cost_[i]), end(aggregated_cost_[i]), 0);
     }
     // left to right
     AggregateCost(x_from, x_to, 1, 
