@@ -201,7 +201,7 @@ void StereoMatcher::ProcessLine(const uchar* base, const uchar* match,
     const int y_1 = 1 - y_0;
 
     for (int i = 0; i < aggregated_cost_.size(); ++i) {
-      std::fill(begin(aggregated_cost_[i]), end(aggregated_cost_[i]), 0);
+      std::fill(aggregated_cost_[i].begin(), aggregated_cost_[i].end(), 0);
     }
     // left to right
     AggregateCost(x_from, x_to, 1, 
