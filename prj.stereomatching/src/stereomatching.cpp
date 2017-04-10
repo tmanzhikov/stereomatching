@@ -7,7 +7,6 @@
 
 namespace sm {
 
-const std::string save_path = "../output/";
 typedef unsigned long long       bitmap;
 typedef short                    cost_type;
 typedef std::vector<cost_type>   buffer_line;
@@ -16,14 +15,14 @@ typedef std::vector<buffer_line> buffer;
 struct Settings {
   int census_wing; // size of census rank kernel
   int census_size; //
-  int max_d;       // maximal disparity value
+  int max_d;       // maximal disparity value, multiplied by 2
   int width;       // image width
   int p1;          //
   int p2;          //
   Settings () {
     census_wing = 3;
     census_size = census_wing * 2 + 1;
-    max_d = 128;
+    max_d = 64;
     width = -1;
     p1    = 3;
     p2    = 10;
@@ -35,8 +34,9 @@ class StereoMatcher {
 public:
   StereoMatcher () {}
   // Computes disparity map of two images.
-  void Process(const cv::Mat& base, const cv::Mat& match);
-
+  void Process(const cv::Mat& base, const cv::Mat& match,
+               const std::string& save_path);
+  void Evaluate(const cv::Mat& gt, const cv::Mat& processed, int d_err);
 private:
   // Computes disparity line by line
   void ProcessLine(const uchar* base, const uchar* match, uchar* res, int y);
@@ -69,7 +69,8 @@ private:
   std::vector<buffer> aggregation_buffer_;
 };
 
-void StereoMatcher::Process(const cv::Mat& base, const cv::Mat& match) {
+void StereoMatcher::Process(const cv::Mat& base, const cv::Mat& match,
+                            const std::string& save_path) {
   /// 1. Initialization
   // reading input images
 
@@ -90,12 +91,12 @@ void StereoMatcher::Process(const cv::Mat& base, const cv::Mat& match) {
       buffer(settings_.max_d, buffer_line(settings_.width, 0)));
 
   /// 2. Processing
-  for (size_t y = 0; y < size_t(base.rows); ++y) {
+  for (int y = 0; y < base.rows; ++y) {
     ProcessLine(base.ptr(y), match.ptr(y), result.ptr(y), y);
   }
 
   /// 3. Saving answer
-  cv::normalize(result, result, 0, 255, cv::NORM_MINMAX, CV_8UC1);
+  //cv::normalize(result, result, 0, 255, cv::NORM_MINMAX, CV_8UC1);
   cv::imwrite(save_path + "disparity_map.png", result);
 
   // will be impossible to apply median filter with online algorithm,
@@ -174,8 +175,8 @@ void StereoMatcher::ProcessLine(const uchar* base, const uchar* match,
   // disparity cost computing
   const int x_from = settings_.census_wing;
   const int x_to   = settings_.width - settings_.census_wing;
-  const int d_from = -settings_.max_d / 2;
-  const int d_to   = settings_.max_d / 2;
+  const int d_from = 0;
+  const int d_to   = settings_.max_d;
   for (int x = x_from; x < x_to; ++x) {
     for (int d = d_from; d < d_to; ++d) {
       int x_match = x + d;
@@ -216,7 +217,7 @@ void StereoMatcher::ProcessLine(const uchar* base, const uchar* match,
                   -1, x_from, y_0, y_0);
   }
   // saving answer
-  for (int x = x_from; x < x_to; ++x) {
+  for (int x = settings_.max_d / 2; x < x_to; ++x) {
     cost_type min_val = std::numeric_limits<cost_type>::max();
     for (int d = 0; d < settings_.max_d; ++d) {
       if (aggregated_cost_[d][x] < min_val) {
@@ -264,26 +265,71 @@ void StereoMatcher::RecomputeCensusRank() {
   // recomputes census rank with O(census_wing) instead of O(census_wing^2)
 }
 
+void StereoMatcher::Evaluate(const cv::Mat& gt, const cv::Mat& processed, int d_err) {
+  cv::Mat ret(cv::Mat::zeros(gt.rows, gt.cols, CV_8UC1));
+  ret = cv::Scalar::all(127);
+
+  gt /= 4; // certanly correct for cones dataset, not sure about others
+
+  int total_cnt = 0;
+  int error_cnt = 0;
+  for (int y = settings_.census_wing; y < gt.rows - settings_.census_wing; ++y) {
+    uchar* p_ret = ret.ptr(y);
+    const uchar* p_gt  = gt.ptr(y);
+    const uchar* p_processed = processed.ptr(y);
+    for (int x = settings_.max_d; x < settings_.width - settings_.max_d; ++x) {
+      int is_error = std::abs(int(p_gt[x]) - int(p_processed[x])) > d_err;
+      p_ret[x] = (is_error ? 0 : 255);
+
+      total_cnt++;
+      error_cnt += is_error;
+    }
+  }
+
+  std::cout << "Error rate: " << std::fixed << std::setprecision(2) <<
+               100.0 * error_cnt / total_cnt << std:: endl;
+  cv::imwrite("../output/error_mask.png", ret);
+}
+
 } // namespace sm
 
 int main(int argc, char* argv[]) {
 
   std::string path_base;
   std::string path_match;
+  std::string path_save;
+  std::string path_gt;
 
   if (argc < 2) {
-    path_base = "../testdata/cones1.png";
-    path_match = "../testdata/cones2.png";
+    path_base = "../testdata/teddy6.png";
+    path_match = "../testdata/teddy2.png";
+    path_save = "../output/";
+    path_gt = "../testdata/disp_teddy6.png";
   } else {
     path_base = argv[1];
     path_match = argv[2];
+    path_save = argv[3];
+    path_gt = argv[4];
   }
   cv::Mat base = cv::imread(path_base, CV_LOAD_IMAGE_GRAYSCALE);
   cv::Mat match = cv::imread(path_match, CV_LOAD_IMAGE_GRAYSCALE);
 
   if (base.data && match.data) {
+    std::cout << "Processing " << path_base << ", " << path_match << std::endl;
     sm::StereoMatcher solver;
-    solver.Process(base, match);
+    solver.Process(base, match, path_save);
+    std::cout << "Processing complete" << std::endl;
+    std::cout << "Result written to " << path_save << std::endl;
+
+    if (path_gt != "") {
+      cv::Mat dm = cv::imread(path_save + "blurred_disparity_map.png",
+                              CV_LOAD_IMAGE_GRAYSCALE);
+      cv::Mat gt = cv::imread(path_gt, CV_LOAD_IMAGE_GRAYSCALE);
+
+      std::cout << "Evaluating " << path_save << ", " << path_gt << std::endl;
+      solver.Evaluate(gt, dm, 2);
+      std::cout << "Evaluating complete" << std::endl;
+    }
   } else {
     std::cout << "Failed to read images" << std::endl;
   }
